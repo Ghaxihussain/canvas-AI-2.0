@@ -1,7 +1,9 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
-DATABASE_URL = "postgresql+psycopg2://myuser:your_password@localhost:5432/canvas_ai"
+
+
+DATABASE_URL =  "postgresql+psycopg2://myuser:123@localhost:5432/canvas_ai"
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(bind=engine)
@@ -16,3 +18,6 @@ def get_db():
         yield db
     finally:
         db.close()
+
+def create_db():
+    Base.metadata.create_all(engine)

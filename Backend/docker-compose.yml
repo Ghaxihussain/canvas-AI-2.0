@@ -1,0 +1,17 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: canvas_ai_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: canvas_ai
+      POSTGRES_USER: myuser
+      POSTGRES_PASSWORD: 123
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+ 
+volumes:
+  pgdata:
+ 

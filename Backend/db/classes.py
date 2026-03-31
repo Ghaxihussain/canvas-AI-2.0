@@ -11,5 +11,6 @@ class Class(Base):
     name = Column(String, nullable=False)
     description = Column(Text)
     class_code = Column(String, nullable=False, unique=True)
-    owner_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, onupdate="CASCADE")
+    owner_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT", onupdate="CASCADE"), nullable=False)
+
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
