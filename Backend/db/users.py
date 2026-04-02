@@ -49,6 +49,13 @@ class User(Base):
             print(e)
             return None
     
+    @classmethod
+    def get_user_by_id(cls, user_id, db):
+        try:
+            return db.execute(select(cls).where(cls.id == user_id)).scalar_one_or_none()
+        except Exception as e:
+            print(e)
+            return None
 
     @classmethod
     def delete_user(cls, email, password, db):
@@ -63,7 +70,7 @@ class User(Base):
             print(e)
             return None
         
-        
+
     @classmethod
     def verify_user_password(cls, email, password, db):
         try:
