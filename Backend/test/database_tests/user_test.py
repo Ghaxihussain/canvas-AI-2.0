@@ -35,7 +35,7 @@ def test_delete_user(db):
 
     assert User.get_user_by_email(email="g@gmail.com", db = db) is not None
     User.delete_user(email = "g@gmail.com", password= "123", db = db)
-    assert User.get_user_by_email(email="g@gmail.com", db = db) is None
+    assert User.get_user_by_email(email="g@gmail.com", db = db).is_deleted == True
     assert User.delete_user(email = "a@gmail.com", password= "1234", db = db) == False
     assert User.get_user_by_email(email= "a@gmail.com", db = db)
 

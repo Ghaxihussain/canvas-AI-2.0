@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, TIMESTAMP, insert, select, delete
+from sqlalchemy import Column, String, Text, TIMESTAMP, insert, select, delete, Boolean, update
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from uuid import uuid4
@@ -14,6 +14,7 @@ class User(Base):
     name = Column(String, nullable=False)
     email = Column(String, nullable=False, unique=True)
     password_hash = Column(Text, nullable=False)
+    is_deleted = Column(Boolean, nullable=False, default=False)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     @classmethod
@@ -53,7 +54,7 @@ class User(Base):
     def delete_user(cls, email, password, db):
         try:
             if cls.verify_user_password(email=email, password=password, db=db):
-                db.execute(delete(cls).where(cls.email == email))
+                db.execute(update(cls).where(cls.email == email).values(is_deleted=True))
                 db.commit()
                 return True
             return False
@@ -61,7 +62,8 @@ class User(Base):
             db.rollback()
             print(e)
             return None
-
+        
+        
     @classmethod
     def verify_user_password(cls, email, password, db):
         try:
@@ -75,6 +77,8 @@ class User(Base):
         except Exception as e:
             print(e)
             return None
+    
+
         
         
     @staticmethod
