@@ -81,3 +81,19 @@ class Enrollment(Base):
             db.rollback()
             print(e)
             return None
+        
+    
+
+    @classmethod
+    def get_user_enrollments(cls, user_id, db):
+        try:
+            return [
+                {"class_id": i.class_id, 
+                "user_id": i.user_id, 
+                "role": i.role, 
+                "created_at": i.created_at} 
+                for i in db.execute(select(cls).where(cls.user_id == user_id)).scalars().all()
+                    ]
+        except Exception as e:
+            print(e)
+            return None
