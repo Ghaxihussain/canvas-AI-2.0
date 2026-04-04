@@ -1,8 +1,9 @@
-from sqlalchemy import Column, String, TIMESTAMP, ForeignKey, UniqueConstraint, CheckConstraint, insert, select, update, delete
+from sqlalchemy import Column, String, TIMESTAMP, ForeignKey, UniqueConstraint, CheckConstraint, insert, select, update, delete, join
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from uuid import uuid4
 from .database import Base
+from .users import User
 
 class Enrollment(Base):
     __tablename__ = "enrollments"
@@ -94,6 +95,30 @@ class Enrollment(Base):
                 "created_at": i.created_at} 
                 for i in db.execute(select(cls).where(cls.user_id == user_id)).scalars().all()
                     ]
+        except Exception as e:
+            print(e)
+            return None
+        
+
+    @classmethod
+    def get_class_enrollments(cls, class_id, db):
+        try:
+            res = db.execute(
+                select(cls, User)
+                .join(User, cls.user_id == User.id)
+                .where(cls.class_id == class_id)
+            ).all()
+
+            return [
+                {
+                    "user_id": enrollment.id,
+                    "name": user.name,
+                    "email": user.email,
+                    "role": enrollment.role,
+                    "enrolled_at": enrollment.created_at
+                }
+                for enrollment, user in res
+            ]
         except Exception as e:
             print(e)
             return None
