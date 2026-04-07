@@ -5,6 +5,8 @@ from db.database import Base
 from db.users import User
 
 
+
+
 TEST_DATABASE_URL = "postgresql+psycopg2://myuser:123@localhost:5432/canvas_ai_test"
 
 
