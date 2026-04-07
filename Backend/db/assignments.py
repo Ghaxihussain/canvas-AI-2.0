@@ -100,3 +100,7 @@ class Assignment(Base):
             print(e)
             return None
 
+    
+
+    # need to add some static methods or class methods to stor the objects to aws using boto3, and to retrieve 
+    # and to delete the objects
