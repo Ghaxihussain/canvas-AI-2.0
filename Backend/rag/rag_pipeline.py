@@ -121,9 +121,8 @@ def rag(pdf_path: str = None, type_in: str = None, text_in: str = None, img_path
 
 
     chunks = [c.strip() for c in chunked_text.split("<chunk>") if c.strip()]
-    print(f"Embedding {len(chunks)} chunks...")
-    embeddings = [embed_text(chunk) for chunk in chunks]
+
     
-    return chunks, embeddings
+    return chunks
 
 

@@ -5,5 +5,5 @@ from Backend.db.classes import Class
 from Backend.db.enrollment import Enrollment
 from Backend.db.submissions import Submission
 from Backend.db.announcement import Announcement
- 
+from Backend.db.ragstore import RagStore
 create_db()
