@@ -3,6 +3,7 @@ from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.sql import func
 from pgvector.sqlalchemy import Vector
 from uuid import uuid4
+import re
 from .database import Base
 import openai
 import os
@@ -20,6 +21,7 @@ class RagStore(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     class_id = Column(UUID(as_uuid=True), ForeignKey("classes.id", ondelete="CASCADE"), nullable=False)
     uploaded_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    title = Column(String, nullable=True)
     source_type = Column(String, nullable=False)          
     source_id = Column(UUID(as_uuid=True), nullable=True) 
     source_name = Column(String, nullable=True)           
@@ -55,20 +57,24 @@ class RagStore(Base):
     @classmethod
     def create(cls, class_id, uploaded_by, source_type, content, db,
             source_id=None, source_name=None, source_file_key=None, extra_metadata=None):
+
         try:
+            title = re.search(r'<title>(.*?)</title>', content).group(1).strip()
+            content_in = re.search(r'<content>(.*?)</content>', content, re.DOTALL).group(1).strip()
             print("embedding text .....")
-            embedding = cls.get_embedding(content)
+            embedding = cls.get_embedding(content_in)
             if embedding is None:
                 return None
-
+            print("This is content in", content_in)
             db.execute(insert(cls).values(
                 class_id=class_id,
                 uploaded_by=uploaded_by,
                 source_type=source_type,
                 source_id=source_id,
                 source_name=source_name,
+                title = title,
                 source_file_key=source_file_key,
-                content=content,
+                content=content_in,
                 embedding=embedding,
                 extra_metadata=extra_metadata
             ))

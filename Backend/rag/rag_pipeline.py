@@ -4,6 +4,7 @@ from openai import OpenAI
 from unstructured.partition.pdf import partition_pdf as unstructured_partition_pdf
 from dotenv import load_dotenv
 import os
+import re
 load_dotenv()
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -71,18 +72,26 @@ def agentic_chunk(text: str) -> str:
             "content": f"""Split the following document text into semantic chunks by inserting <chunk> tags at boundaries.
 
 Rules:
-- Each chunk should be self-contained and meaningful
-- Keep questions with their answers together
-- Keep table context with surrounding text
-- only insert <chunk> tags
-- You can modify text, do minimize the tokens, but context and meaning shouldnt be lost
-- skip useless content, such as useless text like index
-- Image descriptions (logos, photos) and decorative text are useless, skip them
-- A "Note:" or disclaimer that directly follows a table or policy belongs in the SAME chunk as that table/policy, never split them
-- The question and ALL its related content (including notes, exceptions, tables) must stay in one chunk
-- You are not ristricted for the lenght of each chunk, but it should be usefull for RAG, if you think the text is useless, just skip it
-Document:
+- Each chunk must be self-contained and answerable on its own
+- Keep every question with ALL its related content: answers, tables, notes, exceptions, disclaimers
+- Never split a table from its surrounding context or trailing "Note:"
+- Skip decorative/useless content: logos, image descriptions, index pages, headers/footers
+- Do NOT rewrite or paraphrase factual content — only remove filler words if needed
+- Each chunk should answer at least one specific question a student might ask
+- Wrap each chunk in <chunk> tags
 
+Table handling:
+- If a chunk contains a table, flatten it into natural language sentences inside <content>
+
+
+Output format:
+<chunk>
+  <title>Short descriptive title</title>
+<content>
+    -Flattened natural language version of the content, no tables
+    -Original markdown table (only if table exists)
+</content>
+</chunk>
 Document:
 {text}"""
         }]
@@ -120,7 +129,8 @@ def rag(pdf_path: str = None, type_in: str = None, text_in: str = None, img_path
         chunked_text = describe_image_with_vision(img_b64)
 
 
-    chunks = [c.strip() for c in chunked_text.split("<chunk>") if c.strip()]
+    chunks = re.findall(r'<chunk>(.*?)</chunk>', chunked_text, re.DOTALL)
+    chunks = [c.strip() for c in chunks]
 
     
     return chunks
