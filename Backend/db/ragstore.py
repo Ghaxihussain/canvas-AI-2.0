@@ -55,17 +55,16 @@ class RagStore(Base):
             return None
 
     @classmethod
-    def create(cls, class_id, uploaded_by, source_type, content, db,
+    def create(cls, class_id, uploaded_by, source_type, content, embedding, db,
             source_id=None, source_name=None, source_file_key=None, extra_metadata=None):
 
         try:
             title = re.search(r'<title>(.*?)</title>', content).group(1).strip()
             content_in = re.search(r'<content>(.*?)</content>', content, re.DOTALL).group(1).strip()
-            print("embedding text .....")
-            embedding = cls.get_embedding(content_in)
+            
             if embedding is None:
                 return None
-            print("This is content in", content_in)
+            
             db.execute(insert(cls).values(
                 class_id=class_id,
                 uploaded_by=uploaded_by,
@@ -85,6 +84,45 @@ class RagStore(Base):
             print(e)
             return None
         
+
+    @classmethod
+    def create_all(cls, class_id, uploaded_by, source_type, chunks, embeddings, db,
+            source_id=None, source_name=None, source_file_key=None, extra_metadata=None):
+        if len(chunks) == len(embeddings):
+            for i in range(len(chunks)):
+                try:
+                    title = re.search(r'<title>(.*?)</title>', chunks[i]).group(1).strip()
+                    content_in = re.search(r'<content>(.*?)</content>', chunks[i], re.DOTALL).group(1).strip()
+                    
+                    if embeddings[i] is None:
+                        print(f"Chunk {i} is None")
+                        continue
+                    
+                    db.execute(insert(cls).values(
+                        class_id=class_id,
+                        uploaded_by=uploaded_by,
+                        source_type=source_type,
+                        source_id=source_id,
+                        source_name=source_name,
+                        title = title,
+                        source_file_key=source_file_key,
+                        content=content_in,
+                        embedding=embeddings[i],
+                        extra_metadata={"chunk_index": i}
+                    ))
+                    db.commit()
+                   
+                except Exception as e:
+                    db.rollback()
+                    print(e)
+                
+                print(f"Chunk {i} success")
+            return True
+        else:
+            return "chunk, embeddings size mismatched"
+        
+
+
     @classmethod
     def get_by_id(cls, rag_id, db):
         try:

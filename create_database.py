@@ -6,4 +6,5 @@ from Backend.db.enrollment import Enrollment
 from Backend.db.submissions import Submission
 from Backend.db.announcement import Announcement
 from Backend.db.ragstore import RagStore
+from Backend.db.api_costs import APICost
 create_db()

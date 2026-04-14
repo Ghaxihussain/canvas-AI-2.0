@@ -9,6 +9,22 @@ load_dotenv()
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+def calculate_cost(input_tokens, output_tokens, model, cached_tokens=0):
+    model_costs = {
+    "gpt-4o":               {"input": 2.50,  "cached": 1.25,  "output": 10.00},
+    "gpt-4o-mini":          {"input": 0.15,  "cached": 0.075, "output": 0.60},
+    "text-embedding-3-small": {"input": 0.02, "output": 0.00},
+    "text-embedding-3-large": {"input": 0.13, "output": 0.00},}
+
+    pricing = model_costs.get(model)
+    if not pricing:
+        return 0.0
+    non_cached = input_tokens - cached_tokens
+    input_cost  = (non_cached     / 1_000_000) * pricing["input"]
+    cache_cost  = (cached_tokens  / 1_000_000) * pricing.get("cached", pricing["input"] * 0.5)
+    output_cost = (output_tokens  / 1_000_000) * pricing["output"]
+    return round(input_cost + cache_cost + output_cost, 8)
+
 
 def is_useless_element(el) -> bool:
     text = str(el.text or "").strip()
@@ -35,7 +51,7 @@ def describe_image_with_vision(b64: str) -> str:
             ]
         }]
     )
-    return response.choices[0].message.content
+    return {"content": response.choices[0].message.content, "input":response.usage.prompt_tokens , "output": response.usage.completion_tokens, "cached": response.usage.prompt_tokens_details.cached_tokens}
 
 def partition_pdf_file(path: str) -> list:
     return unstructured_partition_pdf(
@@ -47,18 +63,22 @@ def partition_pdf_file(path: str) -> list:
     )
 
 def make_text(els) -> str:
-    res = ""
+    final_res = {"input": 0, "output":0, "cached": 0, "content": ""}
     for el in els:
         if is_useless_element(el):
             continue
         if el.category == "Image":
             if el.metadata.image_base64:
-                res += describe_image_with_vision(el.metadata.image_base64)
+                output = describe_image_with_vision(el.metadata.image_base64)
+                final_res["content"] += output["content"]
+                final_res["input"] += output["input"]
+                final_res["output"] += output["output"]
+                final_res["cached"] += output["cached"]
         elif el.category == "Table":
-            res += el.metadata.text_as_html or el.text
+            final_res["content"] += el.metadata.text_as_html or el.text
         else:
-            res += el.text + "\n"
-    return res
+            final_res["content"] += el.text + "\n"
+    return final_res
 
 def agentic_chunk(text: str) -> str:
     response = client.chat.completions.create(
@@ -98,41 +118,70 @@ Document:
     )
     print(f"Input tokens: {response.usage.prompt_tokens}")
     print(f"Output tokens: {response.usage.completion_tokens}")
-    return response.choices[0].message.content
+    return {"content": response.choices[0].message.content, "input":response.usage.prompt_tokens , "output": response.usage.completion_tokens, "cached": response.usage.prompt_tokens_details.cached_tokens}
 
-def embed_text(text: str) -> list[float]:
-    response = client.embeddings.create(
-        model="text-embedding-3-small",
-        input=text
-    )
-    return response.data[0].embedding
+def get_embedding(text):
+    try:
+        
+        response = client.embeddings.create(
+            input=text,
+            model="text-embedding-3-small"
+        )
+        
+        return {"input": response.usage.prompt_tokens,"output": 0,  "embedding": response.data[0].embedding}
+    except Exception as e:
+        print(e)
+        return None
 
-def rag(pdf_path: str = None, type_in: str = None, text_in: str = None, img_path = None):
+def rag(pdf_path: str = None, type_in: str = None, text_in: str = None, img_path=None):
+    total_cost = {"input": 0, "output": 0, "cached": 0}
     chunked_text = None
+
     if type_in == "pdf":
         print(f"Partitioning: {pdf_path}")
         els = partition_pdf_file(pdf_path)
-        
+
         print("Building text...")
-        text = make_text(els)
+        text = make_text(els)                          
+        total_cost["input"]  += text["input"]
+        total_cost["output"] += text["output"]
+        total_cost["cached"] += text["cached"]
+
         print("Chunking...")
-        chunked_text = agentic_chunk(text)
-    
+        chunked_text = agentic_chunk(text["content"])  
+        total_cost["input"]  += chunked_text["input"]
+        total_cost["output"] += chunked_text["output"]
+        total_cost["cached"] += chunked_text["cached"]
+
     if type_in == "text":
         chunked_text = agentic_chunk(text_in)
-    
-
+        total_cost["input"]  += chunked_text["input"]
+        total_cost["output"] += chunked_text["output"]
+        total_cost["cached"] += chunked_text["cached"]
 
     if type_in == "image" and img_path:
         with open(img_path, "rb") as f:
             img_b64 = base64.b64encode(f.read()).decode("utf-8")
         chunked_text = describe_image_with_vision(img_b64)
-
-
-    chunks = re.findall(r'<chunk>(.*?)</chunk>', chunked_text, re.DOTALL)
-    chunks = [c.strip() for c in chunks]
-
+        total_cost["input"]  += chunked_text["input"]
+        total_cost["output"] += chunked_text["output"]
+        total_cost["cached"] += chunked_text["cached"]
     
-    return chunks
+
+
+
+    chunks = re.findall(r'<chunk>(.*?)</chunk>', chunked_text["content"], re.DOTALL)
+    chunks = [c.strip() for c in chunks]
+    embeddings = []
+    embedding_cost = 0
+    for chunk in chunks:
+        res = get_embedding(chunk)
+        embeddings.append(res["embedding"])
+        total_cost["input"] += res["input"]
+        embedding_cost += calculate_cost(res["input"], res["output"], "text-embedding-3-small")
+    
+    chunk_cost = calculate_cost(total_cost["input"], total_cost["output"], "gpt-4o-mini", total_cost["cached"])
+
+    return {"chunks": chunks, "cost": chunk_cost + embedding_cost, "embeddings" : embeddings, "model": "text-embedding-3-small gpt-4o-mini", "tokens": total_cost}
 
 
