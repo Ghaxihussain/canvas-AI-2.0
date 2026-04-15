@@ -1,0 +1,17 @@
+[
+    {
+        "type": "function",
+        "function": {
+            "name": "search_vdb",
+            "description": "Search the vector database for relevant chunks",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"}
+                },
+                "required": ["query"]
+            }
+        }
+    }
+    
+]

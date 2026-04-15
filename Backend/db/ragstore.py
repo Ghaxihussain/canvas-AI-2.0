@@ -49,7 +49,7 @@ class RagStore(Base):
                 input=text,
                 model=EMBEDDING_MODEL
             )
-            return response.data[0].embedding
+            return {"input": response.usage.prompt_tokens,"output": 0,  "embedding": response.data[0].embedding}
         except Exception as e:
             print(e)
             return None
@@ -173,18 +173,22 @@ class RagStore(Base):
 
     @classmethod
     def search(cls, query, class_id, db, top_k=5):
-        """Semantic search within a class."""
         try:
-            query_embedding = cls.get_embedding(query)
-            if query_embedding is None:
+            embedding_response = cls.get_embedding(query)
+            if embedding_response is None:
                 return None
 
-            return db.execute(
+            query_embedding = embedding_response["embedding"]
+            input_tokens = embedding_response["input"]
+
+            results = db.execute(
                 select(cls)
                 .where(cls.class_id == class_id)
                 .order_by(cls.embedding.cosine_distance(query_embedding))
                 .limit(top_k)
             ).scalars().all()
+
+            return {"results": results, "input": input_tokens, "output": 0}
         except Exception as e:
             print(e)
             return None
