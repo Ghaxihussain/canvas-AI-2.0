@@ -51,3 +51,11 @@ def upload_submission(file, assignment_id, user_id, filename):
 def upload_assignment_file(file, class_id, assignment_id, filename):
     key = f"assignments/{class_id}/{assignment_id}/{filename}"
     return upload_file(file, key)
+
+
+
+def get_s3_object(bucket: str, key: str) -> tuple[bytes, str]:
+    response = s3.get_object(Bucket=bucket, Key=key)
+    content = response["Body"].read()
+    content_type = response["ContentType"]  
+    return content, content_type

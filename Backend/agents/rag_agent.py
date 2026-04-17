@@ -111,4 +111,9 @@ def rag_agent_main(prompt: str):
 
 
 if __name__ == "__main__":
-    print(rag_agent_main("What is the name of the predisdent of pakistan?"))
+    while True:
+        ui = input("Enter your query: ")
+        if ui.lower() == "exit":
+            break
+        response = rag_agent_main(ui)
+        print("Agent Response: ", response)

@@ -14,7 +14,7 @@ class Assignment(Base):
     text_content = Column(Text)
     rubric_text_content = Column(Text)
     assignment_file_url = Column(Text)
-    rubric_file_url = Column(Text)
+    rubric_file_key = Column(Text)
     total_grade = Column(Integer, nullable=False, default=100)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
