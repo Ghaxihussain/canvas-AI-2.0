@@ -8,8 +8,11 @@ from dotenv import load_dotenv
 load_dotenv()
 import base64
 from openai import OpenAI
-
-
+import json
+from sqlalchemy import text
+from Backend.db.database import SessionLocal
+import re
+from sqlalchemy import text
 client = OpenAI(api_key= os.getenv("OPENAI_API_KEY"))
 
 
@@ -89,5 +92,59 @@ Return your response in this format:
     return response.choices[0].message.content
 
 
+def sql_query_genrator(query):
+    structure = None
+    with open("Backend/db_structure.json") as c:
+        structure = json.load(c)
+    prompt = f"""You are a SQL agent. Generate only valid SQL queries.
+The database is PostgreSQL with this schema:
+
+<schema>
+  {structure}
+</schema>
+
+Rules:
+- Only return the SQL query, no explanation
+- Use table aliases for joins
+- Never use SELECT *
+- You are not allowed to delete any row, column or table
+- You are not allowed to update any row, column or table
+
+Return ONLY the raw SQL query with no explanation, 
+no markdown, no code fences, no preamble."""
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": query}
+        ]
+    )
+    return response.choices[0].message.content
+
+
+
+
+def extract_sql(raw: str) -> str:
+    match = re.search(r"```(?:sql)?\s*(.*?)```", raw, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    return raw.strip()
+
+
+
+
+def excecute_sql(query):
+    sql_raw = sql_query_genrator(query)
+    sql = extract_sql(sql_raw)
+    print(sql)
+    
+    with SessionLocal() as db:
+        result = db.execute(text(sql))
+        rows = result.fetchall()
+        keys = result.keys()
+    return [dict(zip(keys, row)) for row in rows]
+
+
+
 if __name__ == "__main__":
-    print(check_hw("assignment.pdf", "submission.pdf", "rubric.pdf", total_grade= 100))
+    print(excecute_sql("what is the mean of all the submission uptull now"))
