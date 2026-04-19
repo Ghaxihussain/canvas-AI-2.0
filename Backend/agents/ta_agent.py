@@ -117,7 +117,9 @@ no markdown, no code fences, no preamble."""
         messages=[
             {"role": "system", "content": prompt},
             {"role": "user", "content": query}
+            
         ]
+    ,temperature=0
     )
     return response.choices[0].message.content
 
@@ -132,19 +134,30 @@ def extract_sql(raw: str) -> str:
 
 
 
+def is_write_query(sql: str) -> bool:
+    pattern = r'\b(INSERT|UPDATE|DELETE|DROP|TRUNCATE|ALTER|CREATE)\b'
+    return bool(re.search(pattern, sql, re.IGNORECASE))
 
 def excecute_sql(query):
     sql_raw = sql_query_genrator(query)
     sql = extract_sql(sql_raw)
-    print(sql)
     
-    with SessionLocal() as db:
-        result = db.execute(text(sql))
-        rows = result.fetchall()
-        keys = result.keys()
-    return [dict(zip(keys, row)) for row in rows]
+    if is_write_query(sql):
+        return None
+    
+    try:
+        with SessionLocal() as db:
+            result = db.execute(text(sql))
+            rows = result.fetchall()
+            keys = result.keys()
+ 
+    except Exception as e:               
+        raise RuntimeError(f"Unexpected error: {e}") from e
+    
+
+    return {"result": [dict(zip(keys, row)) for row in rows], "sql": sql}
 
 
 
 if __name__ == "__main__":
-    print(excecute_sql("what is the mean of all the submission uptull now"))
+    print(excecute_sql("What is the min and max marks a person has scored in any of the graded submission"))
