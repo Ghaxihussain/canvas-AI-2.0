@@ -1,205 +1,32 @@
 import sys
 import os
+import re
+import base64
+import json
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-from Backend.services.aws import get_s3_object
-import sys
-import os
+
 from dotenv import load_dotenv
 load_dotenv()
-import base64
+
 from openai import OpenAI
-import json
-from sqlalchemy import text
+from sqlalchemy import text, select, Update
+from pydantic import BaseModel, Field
+
+from Backend.services.aws import get_s3_object
 from Backend.db.database import SessionLocal
-import re
-from sqlalchemy import text
-from sqlalchemy import Update, select
 from Backend.db.submissions import Submission
 from Backend.db.assignments import Assignment
-from pydantic import BaseModel, Field
+
 
 class GradeResponse(BaseModel):
     grade: float = Field(description="the score of the student out of total grade")
     feedback: str = Field(description="detailed feedback for the student")
 
-client = OpenAI(api_key= os.getenv("OPENAI_API_KEY"))
 
-structure = None
-tools = None
-with open("Backend/agents/ta_agent_tools.json") as filehandle:
-    tools = json.load(filehandle)
-with open("Backend/db_structure.json") as c:
-    structure = json.load(c)
+class TAAgent:
 
-def check_hw(assignment_key, submission_key, rubric_key=None, rubric_text=None, total_grade=100):
-    
-    def build_content_block(data: bytes, content_type: str, label: str) -> list:
-        
-        blocks = [{"type": "text", "text": f"--- {label} ---"}]
-        
-        if content_type.startswith("text/"):
-            blocks.append({"type": "text", "text": data.decode("utf-8")})
-        
-        elif content_type.startswith("image/"):
-            b64 = base64.b64encode(data).decode("utf-8")
-            blocks.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:{content_type};base64,{b64}"}
-            })
-        
-        elif content_type == "application/pdf":
-            b64 = base64.b64encode(data).decode("utf-8")
-            blocks.append({
-                "type": "file",
-                "file": {
-                    "filename": f"{label}.pdf",
-                    "file_data": f"data:application/pdf;base64,{b64}"
-                }
-            })
-        
-        return blocks
-    rubric = []
-    
-    if rubric_key is None and rubric_text is None:
-        rubric = [{"type": "text", "text": "--- RUBRIC ---\nCHECK THIS BASED ON YOUR KNOWLEDGE"}]
-   
-
-    if rubric_key is not None:
-        rubric_data, rubric_content_type = get_s3_object(os.getenv("AWS_BUCKET_NAME"), rubric_key)
-        rubric += build_content_block(rubric_data, rubric_content_type, "RUBRIC FILE")
-
-    if rubric_text is not None:
-        rubric += [{"type": "text", "text": f"--- RUBRIC TEXT ---\n{rubric_text}"}]
-
-    assignment_data, assignment_content_type = get_s3_object(os.getenv("AWS_BUCKET_NAME"), assignment_key)
-    submission_data, submission_content_type = get_s3_object(os.getenv("AWS_BUCKET_NAME"), submission_key)
-
-    assignment_blocks = build_content_block(assignment_data, assignment_content_type, "ASSIGNMENT")
-    submission_blocks = build_content_block(submission_data, submission_content_type, "SUBMISSION")
-
-    system_prompt = f"""You are a strict but fair homework grader.
-Grade the student's submission against the assignment and rubric.
-If you are unable to check or grade the assignment for any reason 
-(unreadable file, unclear submission, missing content, etc.), respond with exactly one word: utca
-Total grade is out of {total_grade} points.
-"""
-
-    content = [
-        *rubric,
-        *assignment_blocks,
-        *submission_blocks,
-        {"type": "text", "text": f"Now grade the submission out of {total_grade} points."}
-    ]
-
-    response = client.chat.completions.parse(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": content}
-        ],
-        response_format= GradeResponse
-    )
-
-    return response.choices[0].message.parsed
-
-
-
-
-def sql_query_genrator(query):
-    
-    prompt = f"""You are a SQL agent. Generate only valid SQL queries.
-The database is PostgreSQL with this schema:
-
-<schema>
-  {structure}
-</schema>
-
-Rules:
-- Only return the SQL query, no explanation
-- Use table aliases for joins
-- Never use SELECT *
-- You are not allowed to delete any row, column or table
-- You are not allowed to update any row, column or table
-
-Return ONLY the raw SQL query with no explanation, 
-no markdown, no code fences, no preamble."""
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": prompt},
-            {"role": "user", "content": query}
-            
-        ]
-    ,temperature=0
-    )
-    return response.choices[0].message.content
-
-
-
-
-def extract_sql(raw: str) -> str:
-    match = re.search(r"```(?:sql)?\s*(.*?)```", raw, re.DOTALL)
-    if match:
-        return match.group(1).strip()
-    return raw.strip()
-
-
-
-def is_write_query(sql: str) -> bool:
-    pattern = r'\b(INSERT|UPDATE|DELETE|DROP|TRUNCATE|ALTER|CREATE)\b'
-    return bool(re.search(pattern, sql, re.IGNORECASE))
-
-def get_data_from_db(query):
-    sql_raw = sql_query_genrator(query)
-    sql = extract_sql(sql_raw)
-    
-    if is_write_query(sql):
-        return None
-    
-    try:
-        with SessionLocal() as db:
-            result = db.execute(text(sql))
-            rows = result.fetchall()
-            keys = result.keys()
- 
-    except Exception as e:               
-        raise RuntimeError(f"Unexpected error: {e}") from e
-    
-
-    return {"result": [dict(zip(keys, row)) for row in rows], "sql": sql}
-
-def assignment_id_based_homework_checker(aid):
-    try:
-        with SessionLocal() as db:
-            assignment = db.execute(select(Assignment).where(Assignment.id == aid)).scalar_one_or_none()
-            submissions = db.execute(select(Submission).where(Submission.assignment_id == aid)).scalars().all()
-
-            print("checking assignment ......")
-            for submission in submissions:
-                res = check_hw(submission_key=submission.file_url, assignment_key= assignment.assignment_file_url, rubric_text= assignment.rubric_text_content, rubric_key= assignment.rubric_file_url)
-                Submission.grade_submission(assignment_id=aid, user_id = submission.user_id, grade = res.grade, feedback = f"This is a AI genrated Feedback \n{res.feedback}", db = db)
-        return True
-
-    except Exception as e:
-        print(f"error {e}")
-        return False
-
-        
-def submission_number_based_homework_checker(sid):
-    try:
-        with SessionLocal() as db:
-            submission = db.execute(select(Submission).where(Submission.assignment_id == sid)).scalar_one_or_none()
-            assignment = db.execute(select(Assignment).where(Assignment.id == submission.assignment_id)).scalar_one_or_none()
-            print("checking assignment ......")
-            res = check_hw(submission_key=submission.file_url, assignment_key= assignment.assignment_file_url, rubric_text= assignment.rubric_text_content, rubric_key= assignment.rubric_file_url)
-            Submission.grade_submission(assignment_id=sid, user_id = submission.user_id, grade = res.grade, feedback = f"This is a AI genrated Feedback \n{res.feedback}", db = db)
-        return True
-
-    except Exception as e:
-        print(f"error {e}")
-        return False
-
-system_prompt = """You are a TA (Teaching Assistant) AI agent for a Canvas-like learning management system.
+    SYSTEM_PROMPT = """You are a TA (Teaching Assistant) AI agent for a Canvas-like learning management system.
 You have access to tools to query the database and grade student submissions.
 
 ## Your Responsibilities
@@ -228,102 +55,229 @@ You have access to tools to query the database and grade student submissions.
 - For errors: clearly state what went wrong and what the user can do
 """
 
-def ta_agent_main(prompt):
-    messages = [
-    {"role": "system", "content": system_prompt},
-    {"role": "user", "content" : prompt}
-    ]
-    while True:
-        response = client.chat.completions.create(
+    def __init__(self):
+        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+        with open("Backend/agents/ta_agent_tools.json") as f:
+            self.tools = json.load(f)
+
+        with open("Backend/db_structure.json") as f:
+            self.structure = json.load(f)
+
+
+    def build_content_block(self, data, content_type, label):
+        blocks = [{"type": "text", "text": f"--- {label} ---"}]
+
+        if content_type.startswith("text/"):
+            blocks.append({"type": "text", "text": data.decode("utf-8")})
+
+        elif content_type.startswith("image/"):
+            b64 = base64.b64encode(data).decode("utf-8")
+            blocks.append({"type": "image_url", "image_url": {"url": f"data:{content_type};base64,{b64}"}})
+
+        elif content_type == "application/pdf":
+            b64 = base64.b64encode(data).decode("utf-8")
+            blocks.append({"type": "file", "file": {"filename": f"{label}.pdf", "file_data": f"data:application/pdf;base64,{b64}"}})
+
+        return blocks
+
+    def check_hw(self, assignment_key, submission_key, rubric_key=None, rubric_text=None, total_grade=100):
+        bucket = os.getenv("AWS_BUCKET_NAME")
+        rubric = []
+
+        if rubric_key is None and rubric_text is None:
+            rubric = [{"type": "text", "text": "--- RUBRIC ---\nCHECK THIS BASED ON YOUR KNOWLEDGE"}]
+
+        if rubric_key:
+            data, content_type = get_s3_object(bucket, rubric_key)
+            rubric += self.build_content_block(data, content_type, "RUBRIC FILE")
+
+        if rubric_text:
+            rubric += [{"type": "text", "text": f"--- RUBRIC TEXT ---\n{rubric_text}"}]
+
+        assignment_data, assignment_ct = get_s3_object(bucket, assignment_key)
+        submission_data, submission_ct = get_s3_object(bucket, submission_key)
+
+        content = [
+            *rubric,
+            *self.build_content_block(assignment_data, assignment_ct, "ASSIGNMENT"),
+            *self.build_content_block(submission_data, submission_ct, "SUBMISSION"),
+            {"type": "text", "text": f"Now grade the submission out of {total_grade} points."}
+        ]
+
+        response = self.client.beta.chat.completions.parse(
             model="gpt-4o",
-            messages= messages,
-            tools = tools)
-        
+            messages=[
+                {"role": "system", "content": f"You are a strict but fair homework grader. Total grade is out of {total_grade} points."},
+                {"role": "user", "content": content}
+            ],
+            response_format=GradeResponse
+        )
+        return response.choices[0].message.parsed
+
+    def assignment_id_based_homework_checker(self, aid):
+        try:
+            with SessionLocal() as db:
+                assignment = db.execute(select(Assignment).where(Assignment.id == aid)).scalar_one_or_none()
+                if not assignment:
+                    print(f"Assignment {aid} not found")
+                    return False
+
+                submissions = db.execute(select(Submission).where(Submission.assignment_id == aid)).scalars().all()
+                print(f"Grading {len(submissions)} submissions...")
+
+                for submission in submissions:
+                    if not assignment.assignment_file_url and not assignment.text_content:
+                        print(f"Skipping submission {submission.id} — no assignment content")
+                        continue
+
+                    res = self.check_hw(
+                        submission_key=submission.file_url,
+                        assignment_key=assignment.assignment_file_url,
+                        rubric_text=assignment.rubric_text_content,
+                        rubric_key=assignment.rubric_file_url,
+                        total_grade=assignment.total_grade
+                    )
+                    Submission.grade_submission(
+                        assignment_id=aid,
+                        user_id=submission.user_id,
+                        grade=res.grade,
+                        feedback=f"AI Generated Feedback\n{res.feedback}",
+                        db=db
+                    )
+            return True
+
+        except Exception as e:
+            print(f"Error grading assignment {aid}: {e}")
+            return False
+
+    def submission_number_based_homework_checker(self, sid):
+        try:
+            with SessionLocal() as db:
+                submission = db.execute(select(Submission).where(Submission.id == sid)).scalar_one_or_none()
+                if not submission:
+                    print(f"Submission {sid} not found")
+                    return False
+
+                assignment = db.execute(select(Assignment).where(Assignment.id == submission.assignment_id)).scalar_one_or_none()
+
+                res = self.check_hw(
+                    submission_key=submission.file_url,
+                    assignment_key=assignment.assignment_file_url,
+                    rubric_text=assignment.rubric_text_content,
+                    rubric_key=assignment.rubric_file_url,
+                    total_grade=assignment.total_grade
+                )
+                Submission.grade_submission(
+                    assignment_id=submission.assignment_id,
+                    user_id=submission.user_id,
+                    grade=res.grade,
+                    feedback=f"AI Generated Feedback\n{res.feedback}",
+                    db=db
+                )
+            return True
+
+        except Exception as e:
+            print(f"Error grading submission {sid}: {e}")
+            return False
 
 
-        choice  = response.choices[0]
+    def generate_sql(self, query):
+        prompt = f"""You are a SQL agent. Generate only valid SQL queries.
+The database is PostgreSQL with this schema:
+<schema>{self.structure}</schema>
 
-        if choice.finish_reason == "tool_calls":
-            print("tool called .......")
-            for tool_call in choice.message.tool_calls:
-                name = tool_call.function.name
-                args = json.loads(tool_call.function.arguments)
+Rules:
+- Only return the SQL query, no explanation
+- Use table aliases for joins
+- Never use SELECT *
+- You are not allowed to delete, update, or alter any data
+
+Return ONLY the raw SQL query with no markdown or preamble."""
+
+        response = self.client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "system", "content": prompt}, {"role": "user", "content": query}],
+            temperature=0
+        )
+        return response.choices[0].message.content
+
+    @staticmethod
+    def extract_sql(raw):
+        match = re.search(r"```(?:sql)?\s*(.*?)```", raw, re.DOTALL)
+        return match.group(1).strip() if match else raw.strip()
+
+    @staticmethod
+    def is_write_query(sql):
+        return bool(re.search(r'\b(INSERT|UPDATE|DELETE|DROP|TRUNCATE|ALTER|CREATE)\b', sql, re.IGNORECASE))
+
+    def get_data_from_db(self, query):
+        sql = self.extract_sql(self.generate_sql(query))
+
+        if self.is_write_query(sql):
+            return None
+
+        try:
+            with SessionLocal() as db:
+                result = db.execute(text(sql))
+                rows = result.fetchall()
+                keys = result.keys()
+            return {"result": [dict(zip(keys, row)) for row in rows], "sql": sql}
+        except Exception as e:
+            raise RuntimeError(f"DB query failed: {e}") from e
 
 
-                if name == "get_data_from_db":
-                    res = get_data_from_db(args["query"])
-                    messages.append(choice.message)
+    def handle_tool(self, name, args):
+        if name == "get_data_from_db":
+            return str(self.get_data_from_db(args["query"]))
+
+        elif name == "assignment_id_based_homework_checker":
+            res = self.assignment_id_based_homework_checker(args["aid"])
+            print("Done" if res else "Not done")
+            return str(res)
+
+        elif name == "submission_number_based_homework_checker":
+            res = self.submission_number_based_homework_checker(args["sid"])
+            print("Done" if res else "Not done")
+            return str(res)
+
+        return "Unknown tool"
+
+    def run(self, prompt):
+        messages = [
+            {"role": "system", "content": self.SYSTEM_PROMPT},
+            {"role": "user", "content": prompt}
+        ]
+
+        while True:
+            response = self.client.chat.completions.create(
+                model="gpt-4o",
+                messages=messages,
+                tools=self.tools
+            )
+            choice = response.choices[0]
+
+            if choice.finish_reason == "tool_calls":
+                print("Tool called...")
+                messages.append(choice.message) 
+
+                for tool_call in choice.message.tool_calls:
+                    name = tool_call.function.name
+                    args = json.loads(tool_call.function.arguments)
+                    result = self.handle_tool(name, args)
+
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tool_call.id,
-                        "content": str(res)
+                        "content": result
                     })
 
-                if name == "assignment_id_based_homework_checker":
-                    res = assignment_id_based_homework_checker(args["aid"])
-                    if res == True:
-                        print("Done")
-                    else:
-                        print("Not done")
-                    messages.append(choice.message)
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": str(res)
-                    })
-
-                if name == "submission_number_based_homework_checker":
-                    res = assignment_id_based_homework_checker(args["sid"])
-                    if res == True:
-                        print("Done")
-                    else:
-                        print("Not done")
-                    messages.append(choice.message)
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": str(res)
-                    })
-
-        elif choice.finish_reason == "stop":   
-            return choice.message.content
-
-
-  
-
-
-
-
-
-
-
+            elif choice.finish_reason == "stop":
+                return choice.message.content
 
 
 
 
 if __name__ == "__main__":
-
-
-    print(ta_agent_main("can u make a report for all the student in the DB?"))
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-#     print(excecute_sql("What is the min and max marks a person has scored in any of the graded submission"))# def ta_agent_main(prompt):
+    agent = TAAgent()
+    print(agent.run("Can you make a report for all the students in the DB?"))
