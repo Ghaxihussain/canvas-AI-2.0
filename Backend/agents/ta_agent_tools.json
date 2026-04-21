@@ -1,0 +1,48 @@
+[
+    {
+        "type": "function",
+        "function": {
+            "name": "get_data_from_db",
+            "description": "Gets the data from the database, the user must send the english sentance",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"}
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "assignment_id_based_homework_checker",
+            "description": "Checks all the submissions with assignment id which is geven",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "assignment_id": {"type": "string"},
+                    "aid": {"type": "string"}
+                },
+                "required": ["aid"]
+            }
+        }
+    }
+    ,
+        {
+        "type": "function",
+        "function": {
+            "name": "submission_number_based_homework_checker",
+            "description": "checks the submission with the id given",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "assignment_id": {"type": "string"},
+                    "sid": {"type": "string"}
+                },
+                "required": ["sid"]
+            }
+        }
+    }
+    
+]
