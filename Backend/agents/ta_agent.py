@@ -17,7 +17,7 @@ from Backend.services.aws import get_s3_object
 from Backend.db.database import SessionLocal
 from Backend.db.submissions import Submission
 from Backend.db.assignments import Assignment
-
+from Backend.db.classes import Class
 
 class GradeResponse(BaseModel):
     grade: float = Field(description="the score of the student out of total grade")
@@ -55,8 +55,10 @@ You have access to tools to query the database and grade student submissions.
 - For errors: clearly state what went wrong and what the user can do
 """
 
-    def __init__(self):
+    def __init__(self, user_id):
         self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self.user_id = user_id
+
 
         with open("Backend/agents/ta_agent_tools.json") as f:
             self.tools = json.load(f)
@@ -118,9 +120,9 @@ You have access to tools to query the database and grade student submissions.
     def assignment_id_based_homework_checker(self, aid):
         try:
             with SessionLocal() as db:
-                assignment = db.execute(select(Assignment).where(Assignment.id == aid)).scalar_one_or_none()
+                assignment = db.execute(select(Assignment).where(Assignment.id == aid, (Assignment.created_by) == self.user_id)).scalar_one_or_none()
                 if not assignment:
-                    print(f"Assignment {aid} not found")
+                    print(f"Assignment {aid} not found or the owner is wrong")
                     return False
 
                 submissions = db.execute(select(Submission).where(Submission.assignment_id == aid)).scalars().all()
@@ -151,16 +153,20 @@ You have access to tools to query the database and grade student submissions.
             print(f"Error grading assignment {aid}: {e}")
             return False
 
+
+
     def submission_number_based_homework_checker(self, sid):
         try:
             with SessionLocal() as db:
-                submission = db.execute(select(Submission).where(Submission.id == sid)).scalar_one_or_none()
+                submission = db.execute(select(Submission).where(str(Submission.id)== sid)).scalar_one_or_none()
                 if not submission:
                     print(f"Submission {sid} not found")
                     return False
 
-                assignment = db.execute(select(Assignment).where(Assignment.id == submission.assignment_id)).scalar_one_or_none()
-
+                assignment = db.execute(select(Assignment).where(Assignment.id == submission.assignment_id, (Assignment.created_by) == self.user_id)).scalar_one_or_none()
+                if not assignment:
+                    print(f"Assignment was not created by the {self.user_id}")
+                    return False
                 res = self.check_hw(
                     submission_key=submission.file_url,
                     assignment_key=assignment.assignment_file_url,
@@ -192,7 +198,7 @@ Rules:
 - Use table aliases for joins
 - Never use SELECT *
 - You are not allowed to delete, update, or alter any data
-
+- Only get the data from {self.user_id} 
 Return ONLY the raw SQL query with no markdown or preamble."""
 
         response = self.client.chat.completions.create(
@@ -210,6 +216,65 @@ Return ONLY the raw SQL query with no markdown or preamble."""
     @staticmethod
     def is_write_query(sql):
         return bool(re.search(r'\b(INSERT|UPDATE|DELETE|DROP|TRUNCATE|ALTER|CREATE)\b', sql, re.IGNORECASE))
+    
+    
+    def get_classes_info(self, class_code):
+          
+        with SessionLocal() as db:
+            _class = Class.get_class_by_code(class_code = class_code, db = db)
+            if not _class:
+                print(class_code)
+                print("No class found, hey")
+                return None
+            if str(_class.owner_id) != self.user_id:
+                print("Auth error")
+                return None
+            return Class.get_students_by_code(class_code=class_code, db = db)
+        
+    
+
+            
+    def get_assignment_report(self, assignment_id):
+        stats = {"total": 0, "max": 0, "min": 0, "avg": 0, "total_students": 0}
+
+        with SessionLocal() as db:
+            assignment = db.execute(
+                select(Assignment).where(Assignment.id == assignment_id,Assignment.created_by == self.user_id)).scalar_one_or_none()
+
+            if not assignment:
+                print("assignment not found")
+                return False
+
+            stats["total"] = db.execute(text("SELECT total_grade FROM assignments WHERE id = :aid"),{"aid": assignment_id}).scalar()
+
+            stats["max"] = db.execute(text("SELECT MAX(grade) FROM submissions WHERE assignment_id = :aid"),{"aid": assignment_id}).scalar()
+
+            stats["min"] = db.execute(text("SELECT MIN(grade) FROM submissions WHERE assignment_id = :aid"),{"aid": assignment_id}).scalar()
+
+            stats["avg"] = db.execute(text("SELECT AVG(grade) FROM submissions WHERE assignment_id = :aid"),{"aid": assignment_id}).scalar()
+
+            stats["total_students"] = db.execute(text("SELECT COUNT(*) FROM submissions WHERE assignment_id = :aid"),{"aid": assignment_id}).scalar()
+
+        return stats
+    
+
+
+    def get_class_assignment_based_report(self, class_code):
+        with SessionLocal() as db:
+            class_id = db.execute(select(Class.id).where(Class.owner_id == self.user_id,Class.class_code == class_code)).scalar_one_or_none()
+
+            if not class_id:
+                print("class not found")
+                return False
+
+            assignment_ids = db.execute(text("SELECT id FROM assignments WHERE class_id = :cid"),{"cid": class_id}).all()
+
+            report = [{str(row.id): self.get_assignment_report(row.id)}for row in assignment_ids]
+
+        return report
+
+
+    
 
     def get_data_from_db(self, query):
         sql = self.extract_sql(self.generate_sql(query))
@@ -240,7 +305,21 @@ Return ONLY the raw SQL query with no markdown or preamble."""
             res = self.submission_number_based_homework_checker(args["sid"])
             print("Done" if res else "Not done")
             return str(res)
-
+        elif name == "get_classes_info":
+            res = self.get_classes_info(args["class_code"])
+            print(args["class_code"], "this is the class code")
+            print("Done" if res else "Not done")
+            return str(res)
+        elif name == "get_assignment_report":
+            res = self.get_assignment_report(args["assignment_id"])
+            print("Done" if res else "Not done")
+            return str(res)
+        elif name == "get_class_assignment_based_report":
+            
+            res = self.get_class_assignment_based_report(args["class_code"])
+            print(res)
+            print("Done" if res else "Not done")
+            return str(res)
         return "Unknown tool"
 
     def run(self, prompt):
@@ -279,5 +358,29 @@ Return ONLY the raw SQL query with no markdown or preamble."""
 
 
 if __name__ == "__main__":
-    agent = TAAgent()
-    print(agent.run("Can you make a report for all the students in the DB?"))
+    agent = TAAgent(user_id="a1000000-0000-0000-0000-000000000001")
+    for i in range(100):
+        ui = input(":- ")
+        if ui == "1":
+            break
+        print(agent.run(ui))
+    
+
+    pass
+    
+
+
+    # // {
+    # //     "type": "function",
+    # //     "function": {
+    # //         "name": "get_data_from_db",
+    # //         "description": "Gets the data from the database, the user must send the english sentance",
+    # //         "parameters": {
+    # //             "type": "object",
+    # //             "properties": {
+    # //                 "query": {"type": "string"}
+    # //             },
+    # //             "required": ["query"]
+    # //         }
+    # //     }
+    # // },

@@ -4,6 +4,7 @@ from sqlalchemy.sql import func
 from uuid import uuid4
 from .database import Base
 from .users import User
+from .enrollment import Enrollment
 class Class(Base):
     __tablename__ = "classes"
 
@@ -72,3 +73,15 @@ class Class(Base):
             db.rollback()
             print(e)
             return None
+    
+
+    @classmethod 
+    def get_students_by_code(cls, class_code, db):
+        _class = cls.get_class_by_code(db = db, class_code= class_code)
+
+        if not _class:
+            print("class not found by code")
+            return False
+        
+        return Enrollment.get_class_enrollments(class_id= _class.id, db= db)
+        

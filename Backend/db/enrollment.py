@@ -104,21 +104,24 @@ class Enrollment(Base):
     def get_class_enrollments(cls, class_id, db):
         try:
             res = db.execute(
-                select(cls, User)
+                select(cls, User.name, User.email, User.id)
+                .select_from(cls)
                 .join(User, cls.user_id == User.id)
                 .where(cls.class_id == class_id)
             ).all()
 
             return [
                 {
-                    "user_id": enrollment.id,
-                    "name": user.name,
-                    "email": user.email,
-                    "role": enrollment.role,
-                    "enrolled_at": enrollment.created_at
+                    "user_id": str(row[0].user_id),
+                    "name": row[1],
+                    "email": row[2],
+                    "role": row[0].role,
+                    "created_at": row[0].created_at,
                 }
-                for enrollment, user in res
+                for row in res
             ]
         except Exception as e:
             print(e)
             return None
+
+    

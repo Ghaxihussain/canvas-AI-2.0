@@ -1,18 +1,5 @@
 [
-    {
-        "type": "function",
-        "function": {
-            "name": "get_data_from_db",
-            "description": "Gets the data from the database, the user must send the english sentance",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string"}
-                },
-                "required": ["query"]
-            }
-        }
-    },
+
     {
         "type": "function",
         "function": {
@@ -41,6 +28,52 @@
                     "sid": {"type": "string"}
                 },
                 "required": ["sid"]
+            }
+        }
+    }
+    ,
+    {
+            "type": "function",
+            "function": {
+                "name": "get_classes_info",
+                "description": "Get students enrolled in a class using its class code (e.g. 'MATH101')",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "class_code": {
+                            "type": "string",
+                            "description": "The short class code e.g. 'MATH101', NOT the full name like 'Math 101', Spaces are not allowed in the class code"
+                        }
+                    },
+                    "required": ["class_code"]
+                }
+            }
+        },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_assignment_report",
+            "description": "Returns the min, max, avg, total_submissions, total of a assignment",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "assignment_id": {"type": "string"}
+                },
+                "required": ["assignment_id"]
+            }
+        }
+    },
+        {
+        "type": "function",
+        "function": {
+            "name": "get_class_assignment_based_report",
+            "description": "Returns the report of each assignment in a class",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "class_code": {"type": "string"}
+                },
+                "required": ["class_code"]
             }
         }
     }
