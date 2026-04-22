@@ -78,10 +78,7 @@ class Class(Base):
     @classmethod 
     def get_students_by_code(cls, class_code, db):
         _class = cls.get_class_by_code(db = db, class_code= class_code)
-
         if not _class:
-            print("class not found by code")
-            return False
-        
-        return Enrollment.get_class_enrollments(class_id= _class.id, db= db)
+            return {"status_code": 404, "content": "Class not found", "return": None}
+        return {"status_code": 200, "content": "Success", "return": Enrollment.get_class_enrollments(class_id= _class.id, db= db)}
         

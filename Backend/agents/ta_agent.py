@@ -117,20 +117,28 @@ You have access to tools to query the database and grade student submissions.
         )
         return response.choices[0].message.parsed
 
+    
     def assignment_id_based_homework_checker(self, aid):
         try:
             with SessionLocal() as db:
-                assignment = db.execute(select(Assignment).where(Assignment.id == aid, (Assignment.created_by) == self.user_id)).scalar_one_or_none()
+                assignment = db.execute(
+                    select(Assignment).where(Assignment.id == aid, Assignment.created_by == self.user_id)
+                ).scalar_one_or_none()
+
                 if not assignment:
-                    print(f"Assignment {aid} not found or the owner is wrong")
-                    return False
+                    return {"content": f"Assignment '{aid}' not found or you are not the owner", "data": None, "status_code": 404}
 
                 submissions = db.execute(select(Submission).where(Submission.assignment_id == aid)).scalars().all()
+
+                if not submissions:
+                    return {"content": f"No submissions found for assignment '{aid}'", "data": None, "status_code": 404}
+
                 print(f"Grading {len(submissions)} submissions...")
+                failed = []
 
                 for submission in submissions:
                     if not assignment.assignment_file_url and not assignment.text_content:
-                        print(f"Skipping submission {submission.id} — no assignment content")
+                        failed.append(str(submission.id))
                         continue
 
                     res = self.check_hw(
@@ -147,26 +155,31 @@ You have access to tools to query the database and grade student submissions.
                         feedback=f"AI Generated Feedback\n{res.feedback}",
                         db=db
                     )
-            return True
+
+            if failed:
+                return {"content": f"Grading complete. {len(submissions) - len(failed)} graded, {len(failed)} skipped (no assignment content)", "data": {"failed": failed}, "status_code": 207}
+
+            return {"content": f"All {len(submissions)} submissions graded successfully", "data": None, "status_code": 200}
 
         except Exception as e:
-            print(f"Error grading assignment {aid}: {e}")
-            return False
+            return {"content": f"Error grading assignment '{aid}': {str(e)}", "data": None, "status_code": 500}
 
 
 
     def submission_number_based_homework_checker(self, sid):
         try:
             with SessionLocal() as db:
-                submission = db.execute(select(Submission).where(str(Submission.id)== sid)).scalar_one_or_none()
+                submission = db.execute(select(Submission).where(str(Submission.id) == sid)).scalar_one_or_none()
                 if not submission:
-                    print(f"Submission {sid} not found")
-                    return False
+                    return {"content": f"Submission '{sid}' not found", "data": None, "status_code": 404}
 
-                assignment = db.execute(select(Assignment).where(Assignment.id == submission.assignment_id, (Assignment.created_by) == self.user_id)).scalar_one_or_none()
+                assignment = db.execute(
+                    select(Assignment).where(Assignment.id == submission.assignment_id, Assignment.created_by == self.user_id)
+                ).scalar_one_or_none()
+
                 if not assignment:
-                    print(f"Assignment was not created by the {self.user_id}")
-                    return False
+                    return {"content": f"Assignment for submission '{sid}' not found or you are not the owner", "data": None, "status_code": 403}
+
                 res = self.check_hw(
                     submission_key=submission.file_url,
                     assignment_key=assignment.assignment_file_url,
@@ -181,12 +194,11 @@ You have access to tools to query the database and grade student submissions.
                     feedback=f"AI Generated Feedback\n{res.feedback}",
                     db=db
                 )
-            return True
+
+            return {"content": f"Submission '{sid}' graded successfully", "data": None, "status_code": 200}
 
         except Exception as e:
-            print(f"Error grading submission {sid}: {e}")
-            return False
-
+            return {"content": f"Error grading submission '{sid}': {str(e)}", "data": None, "status_code": 500}
 
     def generate_sql(self, query):
         prompt = f"""You are a SQL agent. Generate only valid SQL queries.
@@ -219,17 +231,13 @@ Return ONLY the raw SQL query with no markdown or preamble."""
     
     
     def get_classes_info(self, class_code):
-          
         with SessionLocal() as db:
-            _class = Class.get_class_by_code(class_code = class_code, db = db)
+            _class = Class.get_class_by_code(class_code=class_code, db=db)
             if not _class:
-                print(class_code)
-                print("No class found, hey")
-                return None
+                return {"content": f"No class found with class_code '{class_code}'", "data": None, "status_code": 404}
             if str(_class.owner_id) != self.user_id:
-                print("Auth error")
-                return None
-            return Class.get_students_by_code(class_code=class_code, db = db)
+                return {"content": "Access denied: you are not the owner of this class", "data": None, "status_code": 403}
+            return {"content": "Students retrieved successfully", "data": Class.get_students_by_code(class_code=class_code, db=db), "status_code": 200}
         
     
 
@@ -239,39 +247,41 @@ Return ONLY the raw SQL query with no markdown or preamble."""
 
         with SessionLocal() as db:
             assignment = db.execute(
-                select(Assignment).where(Assignment.id == assignment_id,Assignment.created_by == self.user_id)).scalar_one_or_none()
+                select(Assignment).where(Assignment.id == assignment_id, Assignment.created_by == self.user_id)
+            ).scalar_one_or_none()
 
             if not assignment:
-                print("assignment not found")
-                return False
+                return {"content": f"No assignment found with id '{assignment_id}' or you are not the owner", "data": None, "status_code": 404}
 
-            stats["total"] = db.execute(text("SELECT total_grade FROM assignments WHERE id = :aid"),{"aid": assignment_id}).scalar()
+            stats["total"] = db.execute(text("SELECT total_grade FROM assignments WHERE id = :aid"), {"aid": assignment_id}).scalar()
+            stats["max"] = db.execute(text("SELECT MAX(grade) FROM submissions WHERE assignment_id = :aid"), {"aid": assignment_id}).scalar()
+            stats["min"] = db.execute(text("SELECT MIN(grade) FROM submissions WHERE assignment_id = :aid"), {"aid": assignment_id}).scalar()
+            stats["avg"] = db.execute(text("SELECT AVG(grade) FROM submissions WHERE assignment_id = :aid"), {"aid": assignment_id}).scalar()
+            stats["total_students"] = db.execute(text("SELECT COUNT(*) FROM submissions WHERE assignment_id = :aid"), {"aid": assignment_id}).scalar()
 
-            stats["max"] = db.execute(text("SELECT MAX(grade) FROM submissions WHERE assignment_id = :aid"),{"aid": assignment_id}).scalar()
-
-            stats["min"] = db.execute(text("SELECT MIN(grade) FROM submissions WHERE assignment_id = :aid"),{"aid": assignment_id}).scalar()
-
-            stats["avg"] = db.execute(text("SELECT AVG(grade) FROM submissions WHERE assignment_id = :aid"),{"aid": assignment_id}).scalar()
-
-            stats["total_students"] = db.execute(text("SELECT COUNT(*) FROM submissions WHERE assignment_id = :aid"),{"aid": assignment_id}).scalar()
-
-        return stats
+        return {"content": "Assignment report retrieved successfully", "data": stats, "status_code": 200}
     
 
 
     def get_class_assignment_based_report(self, class_code):
         with SessionLocal() as db:
-            class_id = db.execute(select(Class.id).where(Class.owner_id == self.user_id,Class.class_code == class_code)).scalar_one_or_none()
+            class_id = db.execute(
+                select(Class.id).where(Class.owner_id == self.user_id, Class.class_code == class_code)
+            ).scalar_one_or_none()
 
             if not class_id:
-                print("class not found")
-                return False
+                return {"content": f"No class found with class_code '{class_code}' or you are not the owner", "data": None, "status_code": 404}
 
-            assignment_ids = db.execute(text("SELECT id FROM assignments WHERE class_id = :cid"),{"cid": class_id}).all()
+            assignment_ids = db.execute(
+                text("SELECT id FROM assignments WHERE class_id = :cid"), {"cid": class_id}
+            ).all()
 
-            report = [{str(row.id): self.get_assignment_report(row.id)}for row in assignment_ids]
+            if not assignment_ids:
+                return {"content": f"No assignments found for class '{class_code}'", "data": None, "status_code": 404}
 
-        return report
+            report = [{str(row.id): self.get_assignment_report(row.id)} for row in assignment_ids]
+
+        return {"content": f"Assignment report for class '{class_code}' retrieved successfully", "data": report, "status_code": 200}
 
 
     

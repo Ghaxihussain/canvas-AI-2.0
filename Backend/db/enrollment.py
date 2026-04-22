@@ -121,7 +121,6 @@ class Enrollment(Base):
                 for row in res
             ]
         except Exception as e:
-            print(e)
-            return None
+           return {"status_code": 404, "content": f"error {e}", "return": None}
 
     

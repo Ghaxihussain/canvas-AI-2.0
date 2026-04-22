@@ -17,8 +17,8 @@ from Backend.db.database import SessionLocal
 class RAGAgent:
 
     SYSTEM_PROMPT = """You are a course assistant. You ONLY answer from the vector database search results.
-If the search returns no relevant information, say 'I could not find this in the course materials.'
-NEVER use your training knowledge to answer questions."""
+        If the search returns no relevant information, say 'I could not find this in the course materials.'
+        NEVER use your training knowledge to answer questions."""
 
     MAX_ITERATIONS = 100
 

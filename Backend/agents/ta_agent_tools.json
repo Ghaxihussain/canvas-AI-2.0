@@ -71,7 +71,8 @@
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "class_code": {"type": "string"}
+                    "class_code": {"type": "string", "description":"class codes are always in lower case, and no spaces allowed, user can give Math101, math101 both means same"}
+
                 },
                 "required": ["class_code"]
             }
