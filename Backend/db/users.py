@@ -21,15 +21,15 @@ class User(Base):
     def create(cls, name, email, password, db):
         try:
             if cls.get_user_by_email(email= email, db = db):
-                return False
+                return {"code": 400}
             password_hash = cls.hash_password(password)
             db.execute(insert(cls).values(name=name, email=email, password_hash=password_hash))
             db.commit()
-            return True
+            return {"code": 200}
         except Exception as e:
             db.rollback()  
             print(e)       
-            return None
+            return {"code": 404}
         
 
 
@@ -76,10 +76,11 @@ class User(Base):
         try:
             user = cls.get_user_by_email(email=email, db = db)
             if user is not None:
-                return cls.verify_password(password, user.password_hash)
+                return {"code": 200, "user_id": str(user.id)} if cls.verify_password(password, user.password_hash) else {"code": 401}
             
+        
             else:
-                return False
+                return {"code": 404}
             
         except Exception as e:
             print(e)
