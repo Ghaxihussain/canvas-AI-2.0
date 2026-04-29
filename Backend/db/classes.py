@@ -21,19 +21,21 @@ class Class(Base):
     def create(cls, name, description, class_code, owner_id, db):
         try:
             if User.get_user_by_id(owner_id, db) is None:
-                return None 
+                return {"code": 404, "detail": "User not found"}
             
-            if db.execute(select(cls).where(cls.class_code == class_code)).scalar_one_or_none() is not None:
-                return False  
+            if db.execute(select(cls).where(cls.class_code == class_code)).scalar_one_or_none():
+                return {"code": 400, "detail": "Class code already exists"}
             
             db.execute(insert(cls).values(name=name, description=description, class_code=class_code, owner_id=owner_id))
             db.commit()
-            return True
+            return {"code": 200}
+            
         except Exception as e:
             db.rollback()
             print(e)
             return None
         
+
     @classmethod
     def get_class_by_id(cls, class_id, db):
         try:
@@ -45,11 +47,15 @@ class Class(Base):
     @classmethod
     def get_class_by_code(cls, class_code, db):
         try:
-            return db.execute(select(cls).where(cls.class_code == class_code)).scalar_one_or_none()
+            result = db.execute(select(cls).where(cls.class_code == class_code)).scalar_one_or_none()
+            if result is None:
+                return {"code": 404}
+            return {"code": 200, "class": result}
         except Exception as e:
             print(e)
             return None
-
+        
+        
     @classmethod
     def get_classes_by_owner(cls, owner_id, db):
         try:
@@ -59,16 +65,11 @@ class Class(Base):
             return None
 
     @classmethod
-    def delete_class(cls, class_id, owner_id, db):
+    def delete_class(cls, class_id, db):
         try:
-            class_ = cls.get_class_by_id(class_id, db)
-            if class_ is None:
-                return False  
-            if class_.owner_id != owner_id:
-                return False  
             db.execute(delete(cls).where(cls.id == class_id))
             db.commit()
-            return True
+            return {"code": 200}
         except Exception as e:
             db.rollback()
             print(e)
