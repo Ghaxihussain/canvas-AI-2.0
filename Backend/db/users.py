@@ -20,23 +20,37 @@ class User(Base):
     @classmethod
     def create(cls, name, email, password, db):
         try:
-            if cls.get_user_by_email(email= email, db = db):
-                return {"code": 400}
+           
+            existing = db.execute(select(cls).where(cls.email == email)).scalar_one_or_none()
+            
+            if existing and not existing.is_deleted:
+                return {"code": 400}  
+            
+            if existing and existing.is_deleted:
+                password_hash = cls.hash_password(password)
+                db.execute(update(cls).where(cls.email == email).values(
+                    name=name,
+                    password_hash=password_hash,
+                    is_deleted=False
+                ))
+                db.commit()
+                return {"code": 200}
+            
             password_hash = cls.hash_password(password)
             db.execute(insert(cls).values(name=name, email=email, password_hash=password_hash))
             db.commit()
             return {"code": 200}
+            
         except Exception as e:
-            db.rollback()  
-            print(e)       
-            return {"code": 404}
-        
+            db.rollback()
+            print(e)
+            return {"code": 500}
 
 
     @classmethod
     def get_user_by_email(cls, email, db):
         try:
-            return db.execute(select(cls).where(cls.email == email)).scalar_one_or_none()
+            return db.execute(select(cls).where(cls.email == email, cls.is_deleted == False)).scalar_one_or_none()
         except Exception as e:
             print(e)
             return None
@@ -44,7 +58,7 @@ class User(Base):
     @classmethod
     def get_user_by_name(cls, name, db):
         try:
-            return db.execute(select(cls).where(cls.name == name)).scalar_one_or_none()
+            return db.execute(select(cls).where(cls.name == name, cls.is_deleted == False)).scalar_one_or_none()
         except Exception as e:
             print(e)
             return None
@@ -52,19 +66,24 @@ class User(Base):
     @classmethod
     def get_user_by_id(cls, user_id, db):
         try:
-            return db.execute(select(cls).where(cls.id == user_id)).scalar_one_or_none()
+            user =  db.execute(select(cls).where(cls.id == user_id,  cls.is_deleted == False)).scalar_one_or_none()
+            if not user:
+                return None
+            return user
         except Exception as e:
-            print(e)
-            return None
+            return {"code": 500}
 
     @classmethod
     def delete_user(cls, email, password, db):
         try:
-            if cls.verify_user_password(email=email, password=password, db=db):
-                db.execute(update(cls).where(cls.email == email).values(is_deleted=True))
-                db.commit()
-                return True
-            return False
+            user = db.execute(select(cls).where(cls.email == email)).scalar_one_or_none()
+            if user is None: return {"code": 404}
+            if not cls.verify_password(password, user.password_hash): return {"code": 404}
+
+            db.execute(update(cls).where(cls.email == email, cls.is_deleted == False).values(is_deleted=True))
+            db.commit()
+            return {"code": 200}
+            
         except Exception as e:
             db.rollback()
             print(e)
@@ -76,11 +95,10 @@ class User(Base):
         try:
             user = cls.get_user_by_email(email=email, db = db)
             if user is not None:
-                return {"code": 200, "user_id": str(user.id)} if cls.verify_password(password, user.password_hash) else {"code": 401}
-            
+                return str(user.id) if cls.verify_password(password, user.password_hash) else False
         
             else:
-                return {"code": 404}
+                return False
             
         except Exception as e:
             print(e)
@@ -97,3 +115,33 @@ class User(Base):
     @staticmethod
     def verify_password(plain: str, hashed: str) -> bool:
         return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    
+
+
+    @classmethod
+    def update_user(cls, old_email:str , email: str, old_name: str, name: str, db):
+        try:
+            db.execute(update(cls).where(cls.email == old_email, cls.name == old_name, cls.is_deleted == False).values(email = email, name = name))
+            db.commit()
+            return {"code": 200}
+        except Exception as e:
+            db.rollback()
+            print(e)
+            return None
+    
+
+    @classmethod
+    def change_password(cls, user_id, old_password, new_password, db):
+        try:
+            user = cls.get_user_by_id(user_id=user_id, db=db)
+            if not user:
+                return {"code": 404}
+            if not cls.verify_password(old_password, user.password_hash):
+                return {"code": 401}
+            db.execute(update(cls).where(cls.id == user_id).values(password_hash=cls.hash_password(new_password)))
+            db.commit()
+            return {"code": 200}
+        except Exception as e:
+            db.rollback()
+            print(e)
+            return {"code": 500}
