@@ -1,12 +1,12 @@
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from Backend.db.database import get_db
 from Backend.routes.helpers import get_current_user
-
+from datetime import datetime
 from Backend.db.announcement import Announcement
 
 ann_router = APIRouter(prefix="/announcements", tags = ["Announcement"])
@@ -29,11 +29,21 @@ def create_announcement(data: CreateAnnouncementPost, class_code: str, user= Dep
 
 
 
+
+
 @ann_router.get("/{class_code}")
-def get_class_announcements(class_code: str, user= Depends(get_current_user), db: Session = Depends(get_db)):
-    res = Announcement.get_class_announcements(code = class_code, db =db)
-    if res is None: raise HTTPException(status_code=500, detail= "Sereve Error") 
-    if res["code"] == 404: raise HTTPException(status_code=404, detail= "Class not found")
+def get_class_announcements(
+    class_code: str,
+    limit: int = Query(default=10, ge=1, le=50),
+    before: datetime | None = Query(default=None, description="Cursor: fetch announcements older than this timestamp"),
+    user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    res = Announcement.get_class_announcements(code=class_code, db=db, limit=limit, before=before)
+    if res is None:
+        raise HTTPException(status_code=500, detail="Server Error")
+    if res["code"] == 404:
+        raise HTTPException(status_code=404, detail="Class not found")
     return res
 
 
