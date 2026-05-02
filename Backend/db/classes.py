@@ -83,3 +83,17 @@ class Class(Base):
             return {"status_code": 404, "content": "Class not found", "return": None}
         return {"status_code": 200, "content": "Success", "return": Enrollment.get_class_enrollments(class_id= _class.id, db= db)}
         
+    
+    @classmethod
+    def is_owner(cls, id, class_code, db):
+        try:
+            result = db.execute(
+                select(cls).where(
+                    cls.class_code == class_code,
+                    cls.owner_id == UUID(id)
+                )
+            ).scalar_one_or_none()
+            return result is not None
+        except Exception as e:
+            print(e)
+            return False

@@ -1,9 +1,10 @@
-from sqlalchemy import Column, String, TIMESTAMP, ForeignKey, UniqueConstraint, CheckConstraint, insert, select, update, delete, join
+from sqlalchemy import Column, String,text, TIMESTAMP, ForeignKey, UniqueConstraint, CheckConstraint, insert, select, update, delete, join
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from uuid import uuid4
 from .database import Base
 from .users import User
+
 
 class Enrollment(Base):
     __tablename__ = "enrollments"
@@ -19,50 +20,58 @@ class Enrollment(Base):
         CheckConstraint("role IN ('teacher', 'student')", name="ck_enrollment_role"),
     )
 
-    @classmethod
-    def create(cls, class_id, user_id, role, db):
+    classmethod
+    def create(cls, class_code, user_id, role, db):
         try:
-            if role not in ['teacher', 'student']:
-                return False  
+            class_ = db.execute(text("SELECT id FROM classes WHERE class_code = :code"), {"code": class_code}).mappings().one_or_none()
 
-            existing = db.execute(
-                select(cls).where(cls.class_id == class_id, cls.user_id == user_id)
-            ).scalar_one_or_none()
+            if class_ is None:
+                return {"code": 404}
+
+            existing = db.execute(select(cls).where(cls.class_id == class_["id"], cls.user_id == user_id)).scalar_one_or_none()
 
             if existing is not None:
-                return False 
+                return {"code": 409}
 
-            db.execute(insert(cls).values(class_id=class_id, user_id=user_id, role=role))
+            db.execute(insert(cls).values(class_id=class_["id"], user_id=user_id, role=role))
             db.commit()
-            return True
+            return {"code": 200}
         except Exception as e:
             db.rollback()
             print(e)
             return None
 
     @classmethod
-    def delete(cls, class_id, user_id, db):
+    def delete(cls, class_code, user_id, db):
         try:
+            class_ = db.execute(
+                text("SELECT id FROM classes WHERE class_code = :code"), {"code": class_code}
+            ).mappings().one_or_none()
+
+            if class_ is None:
+                return {"code": 404}
+
             existing = db.execute(
-                select(cls).where(cls.class_id == class_id, cls.user_id == user_id)
+                select(cls).where(cls.class_id == class_["id"], cls.user_id == user_id)
             ).scalar_one_or_none()
 
             if existing is None:
-                return False  
+                return {"code": 404}
 
-            db.execute(delete(cls).where(cls.class_id == class_id, cls.user_id == user_id))
+            db.execute(delete(cls).where(cls.class_id == class_["id"], cls.user_id == user_id))
             db.commit()
-            return True
+            return {"code": 200}
         except Exception as e:
             db.rollback()
             print(e)
             return None
-
+        
+        
     @classmethod
     def update_role(cls, class_id, user_id, new_role, db):
         try:
             if new_role not in ['teacher', 'student']:
-                return False  # invalid role
+                return False  
 
             existing = db.execute(
                 select(cls).where(cls.class_id == class_id, cls.user_id == user_id)
@@ -124,3 +133,26 @@ class Enrollment(Base):
            return {"status_code": 404, "content": f"error {e}", "return": None}
 
     
+
+@classmethod
+def unenroll_person(cls, id, class_code, db):
+    try:
+        class_ = db.execute(
+            text("SELECT id FROM classes WHERE class_code = :code"), {"code": class_code}).mappings().one_or_none()
+
+        if class_ is None:
+            return {"code": 404}
+
+        existing = db.execute(
+            select(cls).where(cls.id == id, cls.class_id == class_["id"])).scalar_one_or_none()
+
+        if existing is None:
+            return {"code": 404}
+
+        db.execute(delete(cls).where(cls.id == id, cls.class_id == class_["id"]))
+        db.commit()
+        return {"code": 200}
+    except Exception as e:
+        db.rollback()
+        print(e)
+        return None
